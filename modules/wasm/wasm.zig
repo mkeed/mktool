@@ -8,11 +8,14 @@ const Name = struct {
         try data.resize(len);
         errdefer data.deinit();
         _ = try reader.read(data.items);
-        std.log.err("name:[{}]{s}", .{ len, std.fmt.fmtSliceEscapeUpper(data.items) });
+        std.log.err("readname[{}|{x}]{s}|{}", .{ len, len, data.items, std.fmt.fmtSliceHexUpper(data.items) });
         return .{ .data = data };
     }
     pub fn deinit(self: Name) void {
         self.data.deinit();
+    }
+    pub fn format(self: Name, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try std.fmt.format(writer, "{s}", .{self.data.items});
     }
 };
 const RefType = enum(u8) { funcref = 0x70, externref = 0x6f };
@@ -53,6 +56,7 @@ pub const typeidx = i32;
 pub const funcidx = i32;
 pub const tableidx = i32;
 pub const globalidx = i32;
+pub const memidx = i32;
 pub const elemidx = i32;
 pub const dataidx = i32;
 pub const localidx = i32;
@@ -101,6 +105,19 @@ pub const TypeSection = struct {
         args: std.ArrayList(ValType),
         returns: std.ArrayList(ValType),
     };
+    pub fn format(self: TypeSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.funcTypes.items, 0..) |ft, idx| {
+            try std.fmt.format(writer, "[{}] (", .{idx});
+            for (ft.args.items) |a| {
+                try std.fmt.format(writer, "{},", .{a});
+            }
+            try std.fmt.format(writer, ") => (", .{});
+            for (ft.returns.items) |a| {
+                try std.fmt.format(writer, "{},", .{a});
+            }
+            try std.fmt.format(writer, ")\n", .{});
+        }
+    }
     funcTypes: std.ArrayList(FuncType),
 };
 
@@ -141,10 +158,28 @@ pub const ImportSection = struct {
         name: Name,
         desc: Desc,
     };
+    pub fn format(self: ImportSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.imports.items, 0..) |ft, idx| {
+            try std.fmt.format(writer, "[{}] => {}.{} => {}\n", .{ idx, ft.mode, ft.name, ft.desc });
+        }
+    }
     imports: std.ArrayList(Import),
 };
 
 pub const FunctionSection = struct {
+    pub fn init(alloc: std.mem.Allocator) FunctionSection {
+        return FunctionSection{
+            .funcs = std.ArrayList(TypeSection.TypeIdx).init(alloc),
+        };
+    }
+    pub fn deinit(self: FunctionSection) void {
+        self.funcs.deinit();
+    }
+    pub fn format(self: FunctionSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.funcs.items, 0..) |f, idx| {
+            try std.fmt.format(writer, "[{}] => ({})\n", .{ idx, f });
+        }
+    }
     funcs: std.ArrayList(TypeSection.TypeIdx),
 };
 
@@ -178,14 +213,31 @@ pub const ExportSection = struct {
     pub const ExportDescId = enum(u8) { func = 0x00, table = 0x01, mem = 0x02, global = 0x03 };
     pub const ExportDesc = union(ExportDescId) {
         func: funcidx,
-        table: tabletype,
-        mem: memtype,
-        global: globaltype,
+        table: tableidx,
+        mem: memidx,
+        global: globalidx,
     };
     pub const Export = struct {
         nm: Name,
         d: ExportDesc,
+        pub fn deinit(self: Export) void {
+            self.nm.deinit();
+        }
     };
+    pub fn init(alloc: std.mem.Allocator) ExportSection {
+        return .{
+            .@"export" = std.ArrayList(Export).init(alloc),
+        };
+    }
+    pub fn deinit(self: ExportSection) void {
+        for (self.@"export".items) |i| i.deinit();
+        self.@"export".deinit();
+    }
+    pub fn format(self: ExportSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.@"export".items, 0..) |e, idx| {
+            try std.fmt.format(writer, "[{}] => ({},{})\n", .{ idx, e.nm, e.d });
+        }
+    }
     @"export": std.ArrayList(Export),
 };
 
@@ -196,6 +248,17 @@ pub const StartSection = struct {
 pub const WasmFile = struct {
     custom: std.ArrayList(CustomSection),
     type: std.ArrayList(TypeSection),
+    import: std.ArrayList(ImportSection),
+    function: std.ArrayList(FunctionSection),
+    table: std.ArrayList(TableSection),
+    memory: std.ArrayList(MemorySection),
+    global: std.ArrayList(GlobalSection),
+    @"export": std.ArrayList(ExportSection),
+    start: std.ArrayList(StartSection),
+    //element = 9,
+    //code = 10,
+    //data = 11,
+    //@"data count" = 12,
 };
 
 pub const SectionId = enum(u8) {
@@ -217,7 +280,6 @@ pub const SectionId = enum(u8) {
 fn parseVector(comptime T: type, val: *std.ArrayList(T), alloc: std.mem.Allocator, reader: anytype) !void {
     const len = try std.leb.readUleb128(u32, reader);
     try val.ensureTotalCapacity(len);
-    std.log.err("vec:[{}]{}", .{ T, len });
     for (0..len) |_| {
         val.append(try wasmDecode(T, alloc, reader)) catch unreachable;
     }
@@ -225,7 +287,6 @@ fn parseVector(comptime T: type, val: *std.ArrayList(T), alloc: std.mem.Allocato
 
 fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
     const tInfo = @typeInfo(T);
-    std.log.err("decoding {}", .{T});
     switch (tInfo) {
         .@"struct" => |s| {
             if (@hasDecl(T, "decode")) {
@@ -249,8 +310,16 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
         },
         .int => |i| {
             switch (i.signedness) {
-                .signed => return try std.leb.readIleb128(T, reader),
-                .unsigned => return try std.leb.readUleb128(T, reader),
+                .signed => {
+                    const val = try std.leb.readIleb128(T, reader);
+                    std.log.err("{}", .{val});
+                    return val;
+                },
+                .unsigned => {
+                    const val = try std.leb.readUleb128(T, reader);
+                    std.log.err("{}", .{val});
+                    return val;
+                },
             }
         },
         .@"enum" => |e| {
@@ -265,11 +334,13 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
         .@"union" => |u| {
             if (u.tag_type) |t| {
                 const byte = try reader.readInt(u8, .little);
-                errdefer std.log.err("Attempt decode of {}", .{byte});
+                std.log.err("Attempt decode of {}", .{byte});
                 const value = try std.meta.intToEnum(t, byte);
                 inline for (u.fields) |uf| {
                     if (std.meta.stringToEnum(t, uf.name) orelse unreachable == value) {
-                        return @unionInit(T, uf.name, try wasmDecode(uf.type, alloc, reader));
+                        const val = @unionInit(T, uf.name, try wasmDecode(uf.type, alloc, reader));
+                        std.log.err("vall:{}", .{val});
+                        return val;
                     }
                 }
             } else {
@@ -287,7 +358,7 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
 }
 
 test {
-    const bin = @embedFile("loops.wasm");
+    const bin = @embedFile("readfile.wasm");
     var fbs = std.io.fixedBufferStream(bin[0..]);
     errdefer std.log.err("read:{x}", .{fbs.getPos() catch unreachable});
     const reader = fbs.reader();
@@ -298,7 +369,6 @@ test {
     var al = std.ArrayList(u8).init(alloc);
     defer al.deinit();
     while (true) {
-        std.log.err("read_i:{x}", .{fbs.getPos() catch unreachable});
         defer al.clearRetainingCapacity();
         const id = try std.meta.intToEnum(SectionId, reader.readInt(u8, .little) catch break);
         const len = try std.leb.readUleb128(u32, reader);
@@ -306,16 +376,31 @@ test {
         _ = try reader.read(al.items);
         var subfbs = std.io.fixedBufferStream(al.items);
         std.log.err("{}:{x}", .{ id, len });
+        errdefer std.log.err("section: [{}]", .{std.fmt.fmtSliceHexUpper(al.items)});
         switch (id) {
             .type => {
                 const val = try wasmDecode(TypeSection, alloc, subfbs.reader());
+                std.log.err("{}", .{val});
                 defer val.deinit();
             },
             .import => {
                 const val = try wasmDecode(ImportSection, alloc, subfbs.reader());
+                std.log.err("{}", .{val});
                 defer val.deinit();
             },
-            else => {},
+            .function => {
+                const val = try wasmDecode(FunctionSection, alloc, subfbs.reader());
+                std.log.err("{}", .{val});
+                defer val.deinit();
+            },
+            .@"export" => {
+                const val = try wasmDecode(ExportSection, alloc, subfbs.reader());
+                std.log.err("{}", .{val});
+                defer val.deinit();
+            },
+            else => {
+                std.log.err("unhandled {}", .{id});
+            },
         }
     }
 }
