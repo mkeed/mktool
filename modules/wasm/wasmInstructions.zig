@@ -1,3 +1,79 @@
+const std = @import("std");
+const wasm = @import("wasm.zig");
+
+pub const ExprBlock = struct {
+    instructions: std.ArrayList(Instruction),
+    pub fn init(alloc: std.mem.Allocator) ExprBlock {
+        return ExprBlock{
+            .instructions = std.ArrayList(Instruction).init(alloc),
+        };
+    }
+    pub fn decode(alloc: std.mem.Allocator, reader: anytype) !ExprBlock {
+        var self = ExprBlock.init(alloc);
+        errdefer self.deinit();
+        _ = try self.parse(alloc, reader);
+        return self;
+    }
+    const ParseErrorSet = error{ WasmDecodeError, OutOfMemory };
+    pub fn parse(self: *ExprBlock, alloc: std.mem.Allocator, reader: anytype) ParseErrorSet!InsCode {
+        while (true) {
+            const ins = wasm.wasmDecode(Instruction, alloc, reader) catch return error.WasmDecodeError;
+            std.log.err("{}", .{ins});
+            switch (ins) {
+                .end_block => {
+                    return .end_block;
+                },
+                .end_if => {
+                    return .end_block;
+                },
+                else => {
+                    try self.instructions.append(ins);
+                },
+            }
+        }
+    }
+
+    pub fn deinit(self: ExprBlock) void {
+        for (self.instructions.items) |i| {
+            i.deinit();
+        }
+        self.instructions.deinit();
+    }
+};
+
+pub const IfBlock = struct {
+    if_branch: ExprBlock,
+    else_branch: ?ExprBlock,
+
+    pub fn decode(alloc: std.mem.Allocator, reader: anytype) !IfBlock {
+        const blockType = try reader.readInt(u8, .little);
+        if (blockType != 0x40) return error.Unimplemented;
+        var self = IfBlock{
+            .if_branch = ExprBlock.init(alloc),
+            .else_branch = null,
+        };
+        errdefer self.deinit();
+        std.log.err("Start if", .{});
+        const block = self.if_branch.parse(alloc, reader) catch return error.BlockParseFail;
+        if (block == .end_if) {
+            std.log.err("Start else", .{});
+            var e = ExprBlock.init(alloc);
+            errdefer e.deinit();
+            const end = e.parse(alloc, reader) catch return error.BlockParseFail;
+            if (end != .end_block) {
+                return error.InvalidBlock;
+            }
+            self.else_branch = e;
+        }
+        std.log.err("end if", .{});
+        return self;
+    }
+    pub fn deinit(self: IfBlock) void {
+        self.if_branch.deinit();
+        if (self.else_branch) |e| e.deinit();
+    }
+};
+
 pub const InsCode = enum(u8) {
     @"unreachable" = 0x00,
     nop = 0x01, //
@@ -5,6 +81,8 @@ pub const InsCode = enum(u8) {
     loop = 0x03,
     if_else = 0x04,
 
+    end_if = 0x05,
+    end_block = 0x0B,
     br = 0x0C,
     br_if = 0x0D,
     br_table = 0x0E,
@@ -192,4 +270,205 @@ pub const InsCode = enum(u8) {
     complex_ins = 0xFC,
 };
 
-pub const Instruction = union(InsCode) {};
+pub const Instruction = union(InsCode) {
+    @"unreachable": void,
+    nop: void,
+    block: void,
+    loop: void,
+    if_else: IfBlock,
+    end_if: void,
+    end_block: void,
+    br: void,
+    br_if: void,
+    br_table: void,
+    @"return": void,
+
+    call: wasm.funcidx,
+    call_indirect: struct { y: wasm.typeidx, x: wasm.typeidx },
+
+    drop: void,
+    select: void,
+    select_t: void,
+
+    local_get: wasm.localidx,
+    local_set: wasm.localidx,
+    local_tee: wasm.localidx,
+    global_get: wasm.globalidx,
+    global_set: wasm.globalidx,
+    table_get: wasm.tableidx,
+    table_set: wasm.tableidx,
+
+    i32_load: void,
+    i64_load: void,
+    f32_load: void,
+    f64_load: void,
+    i32_load8_s: void,
+    i32_load8_u: void,
+    i32_load16_s: void,
+    i32_load16_u: void,
+    i64_load8_s: void,
+    i64_load8_u: void,
+    i64_load16_s: void,
+    i64_load16_u: void,
+    i64_load32_s: void,
+    i64_load32_u: void,
+    i32_store: void,
+    i64_store: void,
+    f32_store: void,
+    f64_store: void,
+    i32_store_8: void,
+    i32_store_16: void,
+    i64_store_8: void,
+    i64_store_16: void,
+    i64_store_32: void,
+
+    memory_size: void,
+    memory_grow: void,
+
+    i32_const: i32,
+    i64_const: i64,
+    f32_const: f32,
+    f64_const: f64,
+
+    i32_eqz: void,
+    i32_eq: void,
+    i32_ne: void,
+    i32_lt_s: void,
+    i32_lt_u: void,
+    i32_gt_s: void,
+    i32_gt_u: void,
+    i32_le_s: void,
+    i32_le_u: void,
+    i32_ge_s: void,
+    i32_ge_u: void,
+    i64_eqz: void,
+    i64_eq: void,
+    i64_ne: void,
+    i64_lt_s: void,
+    i64_lt_u: void,
+    i64_gt_s: void,
+    i64_gt_u: void,
+    i64_le_s: void,
+    i64_le_u: void,
+    i64_ge_s: void,
+    i64_ge_u: void,
+    f32_eq: void,
+    f32_ne: void,
+    f32_lt: void,
+    f32_gt: void,
+    f32_le: void,
+    f32_ge: void,
+    f64_eq: void,
+    f64_ne: void,
+    f64_lt: void,
+    f64_gt: void,
+    f64_le: void,
+    f64_ge: void,
+    i32_clz: void,
+    i32_ctz: void,
+    i32_popcnt: void,
+    i32_add: void,
+    i32_sub: void,
+    i32_mul: void,
+    i32_div_s: void,
+    i32_div_u: void,
+    i32_rem_s: void,
+    i32_rem_u: void,
+    i32_and: void,
+    i32_or: void,
+    i32_xor: void,
+    i32_shl: void,
+    i32_shr_s: void,
+    i32_shr_u: void,
+    i32_rotl: void,
+    i32_rotr: void,
+    i64_clz: void,
+    i64_ctz: void,
+    i64_popcnt: void,
+    i64_add: void,
+    i64_sub: void,
+    i64_mul: void,
+    i64_div_s: void,
+    i64_div_u: void,
+    i64_rem_s: void,
+    i64_rem_u: void,
+    i64_and: void,
+    i64_or: void,
+    i64_xor: void,
+    i64_shl: void,
+    i64_shr_s: void,
+    i64_shr_u: void,
+    i64_rotl: void,
+    i64_rotr: void,
+    f32_abs: void,
+    f32_neg: void,
+    f32_ceil: void,
+    f32_floor: void,
+    f32_trunc: void,
+    f32_nearest: void,
+    f32_sqrt: void,
+    f32_add: void,
+    f32_sub: void,
+    f32_mul: void,
+    f32_div: void,
+    f32_min: void,
+    f32_max: void,
+    f32_copysign: void,
+    f64_abs: void,
+    f64_neg: void,
+    f64_ceil: void,
+    f64_floor: void,
+    f64_trunc: void,
+    f64_nearest: void,
+    f64_sqrt: void,
+    f64_add: void,
+    f64_sub: void,
+    f64_mul: void,
+    f64_div: void,
+    f64_min: void,
+    f64_max: void,
+    f64_copysign: void,
+    i32_wrap_i64: void,
+    i32_trunc_f32_s: void,
+    i32_trunc_f32_u: void,
+    i32_trunc_f64_s: void,
+    i32_trunc_f64_u: void,
+    i64_extend_i32_s: void,
+    i64_extend_i32_u: void,
+    i64_trunc_f32_s: void,
+    i64_trunc_f32_u: void,
+    i64_trunc_f64_s: void,
+    i64_trunc_f64_u: void,
+    f32_convert_i32_s: void,
+    f32_convert_i32_u: void,
+    f32_convert_i64_s: void,
+    f32_convert_i64_u: void,
+    f32_demote_f64: void,
+    f64_convert_i32_s: void,
+    f64_convert_i32_u: void,
+    f64_convert_i64_s: void,
+    f64_convert_i64_u: void,
+    f64_promote_f32: void,
+    i32_reinterpret_f32: void,
+    i64_reinterpret_f64: void,
+    f32_reinterpret_i32: void,
+    f64_reinterpret_i64: void,
+    i32_extend8_s: void,
+    i32_extend16_s: void,
+    i64_extend8_s: void,
+    i64_extend16_s: void,
+    i64_extend32_s: void,
+    ref_null: void,
+    ref_is_null: void,
+    ref_func: void,
+
+    complex_ins: void,
+
+    pub fn deinit(self: Instruction) void {
+        switch (self) {
+            .if_else => |i| i.deinit(),
+            else => {},
+        }
+        //
+    }
+};

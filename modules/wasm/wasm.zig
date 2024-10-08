@@ -1,4 +1,6 @@
 const std = @import("std");
+const wasmInstruction = @import("wasmInstructions.zig");
+const ExprBlock = wasmInstruction.ExprBlock;
 
 const Name = struct {
     data: std.ArrayList(u8),
@@ -252,13 +254,14 @@ pub const CodeSection = struct {
         };
     }
     pub fn deinit(self: CodeSection) void {
-        //for (self.code.items) |i| i.deinit();
+        for (self.code.items) |i| i.deinit();
         self.code.deinit();
     }
 
     pub const Code = struct {
         size: u32,
         locals: std.ArrayList(Local),
+        expr: ExprBlock,
         pub const Local = struct {
             num: u32,
             t: ValType,
@@ -274,16 +277,19 @@ pub const CodeSection = struct {
             var self = Code{
                 .size = len,
                 .locals = std.ArrayList(Local).init(alloc),
+                .expr = ExprBlock.init(alloc),
             };
             errdefer self.deinit();
             try parseVector(Local, &self.locals, alloc, fbs.reader());
             for (self.locals.items) |i| {
                 std.log.err("{}", .{i});
             }
+            _ = try self.expr.parse(alloc, fbs.reader());
             return self;
         }
         pub fn deinit(self: Code) void {
             self.locals.deinit();
+            self.expr.deinit();
         }
     };
 
@@ -341,7 +347,7 @@ inline fn isVector(comptime T: type) bool {
     return false;
 }
 
-fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
+pub fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
     const tInfo = @typeInfo(T);
     switch (tInfo) {
         .@"struct" => |s| {
@@ -390,12 +396,10 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
         .@"union" => |u| {
             if (u.tag_type) |t| {
                 const byte = try reader.readInt(u8, .little);
-                std.log.err("Attempt decode of {}", .{byte});
                 const value = try std.meta.intToEnum(t, byte);
                 inline for (u.fields) |uf| {
                     if (std.meta.stringToEnum(t, uf.name) orelse unreachable == value) {
                         const val = @unionInit(T, uf.name, try wasmDecode(uf.type, alloc, reader));
-                        std.log.err("vall:{}", .{val});
                         return val;
                     }
                 }
@@ -403,6 +407,14 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
                 @compileLog(T);
                 @compileError("Expected tag type");
             }
+        },
+        .float => {
+            var bytes = std.mem.zeroes([@sizeOf(T)]u8);
+            _ = try reader.read(bytes[0..]);
+            return std.mem.bytesAsValue(T, bytes[0..]).*;
+        },
+        .void => {
+            return {};
         },
         else => {
             @compileLog(T);
