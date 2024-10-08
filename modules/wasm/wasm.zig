@@ -245,6 +245,51 @@ pub const StartSection = struct {
     start: funcidx,
 };
 
+pub const CodeSection = struct {
+    pub fn init(alloc: std.mem.Allocator) CodeSection {
+        return .{
+            .code = std.ArrayList(Code).init(alloc),
+        };
+    }
+    pub fn deinit(self: CodeSection) void {
+        //for (self.code.items) |i| i.deinit();
+        self.code.deinit();
+    }
+
+    pub const Code = struct {
+        size: u32,
+        locals: std.ArrayList(Local),
+        pub const Local = struct {
+            num: u32,
+            t: ValType,
+        };
+        pub fn decode(alloc: std.mem.Allocator, reader: anytype) !Code {
+            const len = try std.leb.readUleb128(u32, reader);
+            var al = std.ArrayList(u8).init(alloc);
+            defer al.deinit();
+            try al.resize(len);
+            _ = try reader.read(al.items);
+            var fbs = std.io.fixedBufferStream(al.items);
+            std.log.err("code section|{}", .{len});
+            var self = Code{
+                .size = len,
+                .locals = std.ArrayList(Local).init(alloc),
+            };
+            errdefer self.deinit();
+            try parseVector(Local, &self.locals, alloc, fbs.reader());
+            for (self.locals.items) |i| {
+                std.log.err("{}", .{i});
+            }
+            return self;
+        }
+        pub fn deinit(self: Code) void {
+            self.locals.deinit();
+        }
+    };
+
+    code: std.ArrayList(Code),
+};
+
 pub const WasmFile = struct {
     custom: std.ArrayList(CustomSection),
     type: std.ArrayList(TypeSection),
@@ -285,6 +330,17 @@ fn parseVector(comptime T: type, val: *std.ArrayList(T), alloc: std.mem.Allocato
     }
 }
 
+inline fn isVector(comptime T: type) bool {
+    const tInfo = @typeInfo(T);
+    switch (tInfo) {
+        .@"struct" => {
+            if (@hasField(T, "items")) return true;
+        },
+        else => {},
+    }
+    return false;
+}
+
 fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
     const tInfo = @typeInfo(T);
     switch (tInfo) {
@@ -298,7 +354,7 @@ fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !T {
                 ret.deinit();
             };
             inline for (s.fields) |f| {
-                if (@hasField(f.type, "items")) { //"items" is just a proxy for being an arraylist find something better?
+                if (isVector(f.type)) { //"items" is just a proxy for being an arraylist find something better?
                     const fieldType = @typeInfo(@field(f.type, "Slice")).pointer.child;
                     try parseVector(fieldType, &@field(ret, f.name), alloc, reader);
                     // is vector
@@ -375,7 +431,7 @@ test {
         try al.resize(len);
         _ = try reader.read(al.items);
         var subfbs = std.io.fixedBufferStream(al.items);
-        std.log.err("{}:{x}", .{ id, len });
+        std.log.err("{}:[{}]{x}", .{ id, len, len });
         errdefer std.log.err("section: [{}]", .{std.fmt.fmtSliceHexUpper(al.items)});
         switch (id) {
             .type => {
@@ -398,8 +454,14 @@ test {
                 std.log.err("{}", .{val});
                 defer val.deinit();
             },
+            .code => {
+                std.log.err("unhandled {}[{}]", .{ id, std.fmt.fmtSliceHexUpper(al.items) });
+                const val = try wasmDecode(CodeSection, alloc, subfbs.reader());
+                std.log.err("{}", .{val});
+                defer val.deinit();
+            },
             else => {
-                std.log.err("unhandled {}", .{id});
+                std.log.err("unhandled {}[{}]", .{ id, std.fmt.fmtSliceHexUpper(al.items) });
             },
         }
     }
