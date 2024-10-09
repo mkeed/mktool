@@ -340,6 +340,8 @@ pub const WasmFile = struct {
     //@"data count" = 12,
 };
 
+pub const wasm = struct {}; // this will be the final output
+
 pub const SectionId = enum(u8) {
     custom = 0,
     type = 1,
