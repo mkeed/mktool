@@ -53,6 +53,23 @@ pub const ValType = enum(u8) {
     //reftype
     funcref = 0x70,
     externref = 0x6F,
+    pub fn format(self: ValType, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        const val: []const u8 = switch (self) {
+            //numbers
+            .i32 => "i32",
+            .i64 => "i64",
+            .f32 => "f32",
+            .f64 => "f64",
+
+            //vectors
+            .v128 => "v128",
+
+            //reftype
+            .funcref => "funcref",
+            .externref => "externref",
+        };
+        try std.fmt.format(writer, "{s}", .{val});
+    }
 };
 pub const typeidx = i32;
 pub const funcidx = i32;
@@ -109,13 +126,19 @@ pub const TypeSection = struct {
     };
     pub fn format(self: TypeSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         for (self.funcTypes.items, 0..) |ft, idx| {
-            try std.fmt.format(writer, "[{}] (", .{idx});
-            for (ft.args.items) |a| {
-                try std.fmt.format(writer, "{},", .{a});
+            try std.fmt.format(writer, "(type (;{};) (func ", .{idx});
+            if (ft.args.items.len > 0) {
+                try std.fmt.format(writer, "(param ", .{});
+                for (ft.args.items) |a| {
+                    try std.fmt.format(writer, "{} ", .{a});
+                }
             }
-            try std.fmt.format(writer, ") => (", .{});
-            for (ft.returns.items) |a| {
-                try std.fmt.format(writer, "{},", .{a});
+            if (ft.returns.items.len > 0) {
+                try std.fmt.format(writer, "(result ", .{});
+                for (ft.returns.items) |a| {
+                    try std.fmt.format(writer, "{} ", .{a});
+                }
+                try std.fmt.format(writer, ")", .{});
             }
             try std.fmt.format(writer, ")\n", .{});
         }
@@ -162,7 +185,8 @@ pub const ImportSection = struct {
     };
     pub fn format(self: ImportSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         for (self.imports.items, 0..) |ft, idx| {
-            try std.fmt.format(writer, "[{}] => {}.{} => {}\n", .{ idx, ft.mode, ft.name, ft.desc });
+            _ = idx;
+            try std.fmt.format(writer, "(import \"{s}\" \"{s}\" {})\n", .{ ft.mode, ft.name, ft.desc });
         }
     }
     imports: std.ArrayList(Import),
@@ -292,7 +316,10 @@ pub const CodeSection = struct {
             self.expr.deinit();
         }
     };
-
+    pub fn format(self: CodeSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = self;
+        _ = writer;
+    }
     code: std.ArrayList(Code),
 };
 
@@ -436,6 +463,12 @@ test {
     const alloc = std.testing.allocator;
     var al = std.ArrayList(u8).init(alloc);
     defer al.deinit();
+    var output = try std.fs.cwd().createFile("test.wat", .{ .truncate = true });
+    defer output.close();
+    var bufw = std.io.bufferedWriter(output.writer());
+    defer _ = bufw.flush() catch {};
+    const writer = bufw.writer();
+    try std.fmt.format(writer, "starting test:{}\n", .{std.time.milliTimestamp()});
     while (true) {
         defer al.clearRetainingCapacity();
         const id = try std.meta.intToEnum(SectionId, reader.readInt(u8, .little) catch break);
@@ -448,11 +481,13 @@ test {
         switch (id) {
             .type => {
                 const val = try wasmDecode(TypeSection, alloc, subfbs.reader());
+                try std.fmt.format(writer, "{}", .{val});
                 std.log.err("{}", .{val});
                 defer val.deinit();
             },
             .import => {
                 const val = try wasmDecode(ImportSection, alloc, subfbs.reader());
+                try std.fmt.format(writer, "{}", .{val});
                 std.log.err("{}", .{val});
                 defer val.deinit();
             },
