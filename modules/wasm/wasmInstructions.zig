@@ -39,6 +39,11 @@ pub const ExprBlock = struct {
         }
         self.instructions.deinit();
     }
+    pub fn format(self: ExprBlock, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.instructions.items) |i| {
+            try std.fmt.format(writer, "{}\n", .{i});
+        }
+    }
 };
 
 pub const IfBlock = struct {

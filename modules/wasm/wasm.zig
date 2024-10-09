@@ -317,8 +317,9 @@ pub const CodeSection = struct {
         }
     };
     pub fn format(self: CodeSection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = self;
-        _ = writer;
+        for (self.code.items, 0..) |i, idx| {
+            try std.fmt.format(writer, "[{}] {}", .{ idx, i });
+        }
     }
     code: std.ArrayList(Code),
 };
@@ -504,6 +505,7 @@ test {
             .code => {
                 std.log.err("unhandled {}[{}]", .{ id, std.fmt.fmtSliceHexUpper(al.items) });
                 const val = try wasmDecode(CodeSection, alloc, subfbs.reader());
+                try std.fmt.format(writer, "{}", .{val});
                 std.log.err("{}", .{val});
                 defer val.deinit();
             },
