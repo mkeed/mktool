@@ -228,6 +228,11 @@ pub const MemorySection = struct {
         limit: Limit,
     };
     mem: std.ArrayList(Memory),
+    pub fn init(alloc: std.mem.Allocator) MemorySection {
+        return .{
+            .mem = std.ArrayList(Memory).init(alloc),
+        };
+    }
     pub fn deinit(self: MemorySection) void {
         self.mem.deinit();
     }
@@ -287,6 +292,42 @@ pub const StartSection = struct {
     start: funcidx,
 };
 
+pub const DataSection = struct {
+    pub const DataType = enum(u8) {
+        exprByte = 0,
+        dataBlock = 1,
+        memExprByte = 2,
+    };
+    pub const Data = union(DataType) {
+        exprByte: struct { e: ExprBlock, data: std.ArrayList(u8) },
+        dataBlock: struct { data: std.ArrayList(u8) },
+        memExprByte: struct { x: memidx, e: ExprBlock, data: std.ArrayList(u8) },
+        pub fn deinit(self: Data) void {
+            switch (self) {
+                .exprByte => |e| {
+                    e.e.deinit();
+                    e.data.deinit();
+                },
+                .dataBlock => |d| {
+                    d.data.deinit();
+                },
+                .memExprByte => |m| {
+                    m.e.deinit();
+                    m.data.deinit();
+                },
+            }
+        }
+    };
+    data: std.ArrayList(Data),
+    pub fn init(alloc: std.mem.Allocator) DataSection {
+        return .{ .data = std.ArrayList(Data).init(alloc) };
+    }
+    pub fn deinit(self: DataSection) void {
+        for (self.data.items) |d| d.deinit();
+        self.data.deinit();
+    }
+};
+
 pub const CodeSection = struct {
     pub fn init(alloc: std.mem.Allocator) CodeSection {
         return .{
@@ -339,57 +380,40 @@ pub const CodeSection = struct {
 };
 
 pub const WasmFile = struct {
-    custom: std.ArrayList(CustomSection),
-    type: std.ArrayList(TypeSection),
-    import: std.ArrayList(ImportSection),
-    function: std.ArrayList(FunctionSection),
-    table: std.ArrayList(TableSection),
-    memory: std.ArrayList(MemorySection),
-    global: std.ArrayList(GlobalSection),
-    @"export": std.ArrayList(ExportSection),
-    start: std.ArrayList(StartSection),
+    custom: ?CustomSection = null,
+    type: ?TypeSection = null,
+    import: ?ImportSection = null,
+    function: ?FunctionSection = null,
+    table: ?TableSection = null,
+    memory: ?MemorySection = null,
+    global: ?GlobalSection = null,
+    @"export": ?ExportSection = null,
+    start: ?StartSection = null,
     //element = 9,
-    code: std.ArrayList(CodeSection),
-    //data = 11,
+    code: ?CodeSection = null,
+    data: ?DataSection = null,
+
     //@"data count" = 12,
-    pub fn init(alloc: std.mem.Allocator) WasmFile {
-        return .{
-            .custom = std.ArrayList(CustomSection).init(alloc),
-            .type = std.ArrayList(TypeSection).init(alloc),
-            .import = std.ArrayList(ImportSection).init(alloc),
-            .function = std.ArrayList(FunctionSection).init(alloc),
-            .table = std.ArrayList(TableSection).init(alloc),
-            .memory = std.ArrayList(MemorySection).init(alloc),
-            .global = std.ArrayList(GlobalSection).init(alloc),
-            .@"export" = std.ArrayList(ExportSection).init(alloc),
-            .start = std.ArrayList(StartSection).init(alloc),
-            .code = std.ArrayList(CodeSection).init(alloc),
-        };
+    pub fn init() WasmFile {
+        return .{};
     }
     pub fn deinit(self: WasmFile) void {
-        for (self.custom.items) |i| i.deinit();
-        self.custom.deinit();
-        for (self.type.items) |i| i.deinit();
-        self.type.deinit();
-        for (self.import.items) |i| i.deinit();
-        self.import.deinit();
-        for (self.function.items) |i| i.deinit();
-        self.function.deinit();
-        for (self.table.items) |i| i.deinit();
-        self.table.deinit();
-        for (self.memory.items) |i| i.deinit();
-        self.memory.deinit();
-        for (self.global.items) |i| i.deinit();
-        self.global.deinit();
-        for (self.@"export".items) |i| i.deinit();
-        self.@"export".deinit();
-        self.start.deinit();
-        for (self.code.items) |i| i.deinit();
-        self.code.deinit();
+        if (self.custom) |v| v.deinit();
+        if (self.type) |v| v.deinit();
+        if (self.import) |v| v.deinit();
+        if (self.function) |v| v.deinit();
+        if (self.table) |v| v.deinit();
+        if (self.memory) |v| v.deinit();
+        if (self.global) |v| v.deinit();
+        if (self.@"export") |v| v.deinit();
+
+        //element = 9,
+        if (self.code) |v| v.deinit();
+        if (self.data) |v| v.deinit();
     }
 
     pub fn parseFile(alloc: std.mem.Allocator, reader: anytype) !WasmFile {
-        var self = WasmFile.init(alloc);
+        var self = WasmFile.init();
         errdefer self.deinit();
         const magic = try reader.readInt(u32, .little);
         const version = try reader.readInt(u32, .little);
@@ -406,13 +430,42 @@ pub const WasmFile = struct {
             var subfbs = std.io.fixedBufferStream(tmp_buffer.items);
             std.log.info("section {}[{}]", .{ id, tmp_buffer.items.len });
             switch (id) {
-                .custom => try self.custom.append(try wasmDecode(CustomSection, alloc, subfbs.reader())),
-                .type => try self.type.append(try wasmDecode(TypeSection, alloc, subfbs.reader())),
-                .import => try self.import.append(try wasmDecode(ImportSection, alloc, subfbs.reader())),
-                .function => try self.function.append(try wasmDecode(FunctionSection, alloc, subfbs.reader())),
-                .@"export" => try self.@"export".append(try wasmDecode(ExportSection, alloc, subfbs.reader())),
-                .code => try self.code.append(try wasmDecode(CodeSection, alloc, subfbs.reader())),
-                .global => try self.global.append(try wasmDecode(GlobalSection, alloc, subfbs.reader())),
+                .custom => {
+                    if (self.custom != null) return error.DuplicateCustomSection;
+                    self.custom = try wasmDecode(CustomSection, alloc, subfbs.reader());
+                },
+                .type => {
+                    if (self.type != null) return error.DuplicateTypeSection;
+                    self.type = try wasmDecode(TypeSection, alloc, subfbs.reader());
+                },
+                .import => {
+                    if (self.import != null) return error.DuplicateImportSection;
+                    self.import = try wasmDecode(ImportSection, alloc, subfbs.reader());
+                },
+                .function => {
+                    if (self.function != null) return error.DuplicateFunctionSection;
+                    self.function = try wasmDecode(FunctionSection, alloc, subfbs.reader());
+                },
+                .@"export" => {
+                    if (self.@"export" != null) return error.DuplicateExportSection;
+                    self.@"export" = try wasmDecode(ExportSection, alloc, subfbs.reader());
+                },
+                .code => {
+                    if (self.code != null) return error.DuplicateCodeSection;
+                    self.code = try wasmDecode(CodeSection, alloc, subfbs.reader());
+                },
+                .global => {
+                    if (self.global != null) return error.DuplicateGlobalSection;
+                    self.global = try wasmDecode(GlobalSection, alloc, subfbs.reader());
+                },
+                .memory => {
+                    if (self.memory != null) return error.DuplicateMemorySection;
+                    self.memory = try wasmDecode(MemorySection, alloc, subfbs.reader());
+                },
+                .data => {
+                    if (self.data != null) return error.DuplicateDataSection;
+                    self.data = try wasmDecode(DataSection, alloc, subfbs.reader());
+                },
                 else => {
                     std.log.err("unhandled {}[{}]", .{ id, std.fmt.fmtSliceHexUpper(tmp_buffer.items) });
                 },
@@ -442,7 +495,7 @@ pub const SectionId = enum(u8) {
 
 fn parseVector(comptime T: type, val: *std.ArrayList(T), alloc: std.mem.Allocator, reader: anytype) !void {
     const len = try std.leb.readUleb128(u32, reader);
-    std.log.err("parseVect:{}|{}", .{ T, len });
+
     try val.ensureTotalCapacity(len);
     for (0..len) |_| {
         val.append(try wasmDecode(T, alloc, reader)) catch unreachable;
@@ -467,13 +520,16 @@ pub fn wasmDecode(comptime T: type, alloc: std.mem.Allocator, reader: anytype) !
             if (@hasDecl(T, "decode")) {
                 return try T.decode(alloc, reader);
             }
-
-            var ret: T = if (@hasDecl(T, "init")) T.init(alloc) else undefined;
+            const has_whole_init = @hasDecl(T, "init");
+            var ret: T = if (has_whole_init) T.init(alloc) else undefined;
             errdefer if (@hasDecl(T, "deinit")) {
                 ret.deinit();
             };
             inline for (s.fields) |f| {
                 if (isVector(f.type)) { //"items" is just a proxy for being an arraylist find something better?
+                    if (!@hasDecl(T, "init")) {
+                        @field(ret, f.name) = f.type.init(alloc);
+                    }
                     const fieldType = @typeInfo(@field(f.type, "Slice")).pointer.child;
                     try parseVector(fieldType, &@field(ret, f.name), alloc, reader);
                     // is vector
