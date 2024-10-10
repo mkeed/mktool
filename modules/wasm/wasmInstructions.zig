@@ -18,7 +18,6 @@ pub const ExprBlock = struct {
     pub fn parse(self: *ExprBlock, alloc: std.mem.Allocator, reader: anytype) ParseErrorSet!InsCode {
         while (true) {
             const ins = wasm.wasmDecode(Instruction, alloc, reader) catch return error.WasmDecodeError;
-            std.log.err("{}", .{ins});
             switch (ins) {
                 .end_block => {
                     return .end_block;
@@ -58,10 +57,8 @@ pub const IfBlock = struct {
             .else_branch = null,
         };
         errdefer self.deinit();
-        std.log.err("Start if", .{});
         const block = self.if_branch.parse(alloc, reader) catch return error.BlockParseFail;
         if (block == .end_if) {
-            std.log.err("Start else", .{});
             var e = ExprBlock.init(alloc);
             errdefer e.deinit();
             const end = e.parse(alloc, reader) catch return error.BlockParseFail;
@@ -70,7 +67,6 @@ pub const IfBlock = struct {
             }
             self.else_branch = e;
         }
-        std.log.err("end if", .{});
         return self;
     }
     pub fn deinit(self: IfBlock) void {
