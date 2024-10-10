@@ -236,6 +236,11 @@ pub const MemorySection = struct {
     pub fn deinit(self: MemorySection) void {
         self.mem.deinit();
     }
+    pub fn format(self: MemorySection, _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.mem.items) |i| {
+            try std.fmt.format(writer, "({})\n", .{i.limit});
+        }
+    }
 };
 
 pub const GlobalSection = struct {
