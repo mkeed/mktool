@@ -1,7 +1,7 @@
 const std = @import("std");
 const wasmInstruction = @import("wasmInstructions.zig");
 const ExprBlock = wasmInstruction.ExprBlock;
-
+pub const Exec = @import("wasmExec.zig");
 const Name = struct {
     data: std.ArrayList(u8),
     pub fn decode(alloc: std.mem.Allocator, reader: anytype) !Name {

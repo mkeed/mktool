@@ -1,5 +1,6 @@
 const std = @import("std");
 const wasm = @import("wasm");
+const ExecCtx = @import("ExecCtx.zig").ExecCtx;
 
 pub fn main() !void {
     var out = std.io.getStdOut();
@@ -8,7 +9,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var file = try std.fs.cwd().openFile("src/readfile.wasm", .{});
+    var file = try std.fs.cwd().openFile("src/add.wasm", .{});
     defer file.close();
     var bufr = std.io.bufferedReader(file.reader());
 

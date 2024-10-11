@@ -11,6 +11,7 @@ pub const ValType = enum {
     ref_funcaddr,
     ref_extern,
 };
+
 pub const Value = union(ValType) {
     i32: i32,
     i64: i64,
@@ -25,7 +26,10 @@ pub const Value = union(ValType) {
 pub const Frame = struct {
     locals: []Value,
     stack: std.ArrayList(Value),
-    pub fn load(comptime T: ValType, val: anytype) !void {}
+    pub fn load(comptime T: ValType, val: anytype) !void {
+        _ = T;
+        _ = val;
+    }
 };
 
 pub const WasmExecCtx = struct {
