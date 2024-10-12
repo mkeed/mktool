@@ -1,5 +1,5 @@
 const std = @import("std");
-const wasm = @import("wasm.zig");
+const wasm = @import("wasmFile.zig");
 
 pub const ExprBlock = struct {
     instructions: std.ArrayList(Instruction),
@@ -48,13 +48,16 @@ pub const ExprBlock = struct {
 pub const IfBlock = struct {
     if_branch: ExprBlock,
     else_branch: ?ExprBlock,
+    block_type: ?wasm.ValType,
 
     pub fn decode(alloc: std.mem.Allocator, reader: anytype) !IfBlock {
         const blockType = try reader.readInt(u8, .little);
-        if (blockType != 0x40) return error.Unimplemented;
+        const valType = if (blockType != 0x40) try std.meta.intToEnum(wasm.ValType, blockType) else null;
+
         var self = IfBlock{
             .if_branch = ExprBlock.init(alloc),
             .else_branch = null,
+            .block_type = valType,
         };
         errdefer self.deinit();
         const block = self.if_branch.parse(alloc, reader) catch return error.BlockParseFail;

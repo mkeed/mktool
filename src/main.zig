@@ -9,15 +9,15 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var file = try std.fs.cwd().openFile("src/add.wasm", .{});
+    var file = try std.fs.cwd().openFile("src/stack.wasm", .{});
     defer file.close();
     var bufr = std.io.bufferedReader(file.reader());
 
-    var w = try wasm.WasmFile.parseFile(alloc, bufr.reader());
+    var w = try wasm.Wasm.init(alloc, bufr.reader());
     defer w.deinit();
 
-    var ectx = ExecCtx.init(alloc, &w);
-    defer ectx.deinit();
-    var value: [1]wasm.Exec.Value = undefined;
-    _ = try ectx.call("add", &.{}, &value);
+    //var ectx = ExecCtx.init(alloc, &w);
+    //defer ectx.deinit();
+    //var value: [1]wasm.Exec.Value = undefined;
+    //_ = try ectx.call("add", &.{}, &value);
 }
