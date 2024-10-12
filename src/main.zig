@@ -15,5 +15,9 @@ pub fn main() !void {
 
     var w = try wasm.WasmFile.parseFile(alloc, bufr.reader());
     defer w.deinit();
-    try std.fmt.format(bufw.writer(), "{}", .{w});
+
+    var ectx = ExecCtx.init(alloc, &w);
+    defer ectx.deinit();
+    var value: [1]wasm.Exec.Value = undefined;
+    _ = try ectx.call("add", &.{}, &value);
 }

@@ -8,3 +8,4 @@
         (i32.add (local.get $a) (local.get $b))
     )
 )
+

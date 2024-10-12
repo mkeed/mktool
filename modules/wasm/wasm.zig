@@ -290,6 +290,17 @@ pub const ExportSection = struct {
             try std.fmt.format(writer, "[{}] => ({},{})\n", .{ idx, e.nm, e.d });
         }
     }
+    pub fn get_func(self: ExportSection, name: []const u8) ?funcidx {
+        for (self.@"export".items) |i| {
+            if (std.mem.eql(u8, i.nm.data.items, name)) {
+                switch (i.d) {
+                    .func => |f| return f,
+                    else => return null,
+                }
+            }
+        }
+        return null;
+    }
     @"export": std.ArrayList(Export),
 };
 
@@ -478,9 +489,17 @@ pub const WasmFile = struct {
         }
         return self;
     }
-};
 
-pub const wasm = struct {}; // this will be the final output
+    pub const FunctionReference = struct {
+        func: funcidx,
+    };
+    pub fn get_export_func(self: WasmFile, name: []const u8) ?FunctionReference {
+        if (self.@"export") |e| {
+            const ref = e.get_func(name);
+        }
+        return null;
+    }
+};
 
 pub const SectionId = enum(u8) {
     custom = 0,

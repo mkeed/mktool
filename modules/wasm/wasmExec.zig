@@ -33,20 +33,24 @@ pub const Frame = struct {
 };
 
 pub const WasmExecCtx = struct {
-    prog: *const wasm.wasm,
+    prog: *const wasm.WasmFile,
 
     stack: std.ArrayList(Frame),
     store: std.ArrayList(Value),
 
     pub fn init(
         alloc: std.mem.Allocator,
-        prog: *const wasm.wasm,
+        prog: *const wasm.WasmFile,
     ) WasmExecCtx {
         return .{
             .prog = prog,
             .stack = std.ArrayList(Frame).init(alloc),
             .store = std.ArrayList(Value).init(alloc),
         };
+    }
+    pub fn deinit(self: WasmExecCtx) void {
+        self.stack.deinit();
+        self.store.deinit();
     }
 };
 
