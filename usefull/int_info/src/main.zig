@@ -69,16 +69,19 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var list = std.ArrayList(PrintedInfo).init(alloc);
-    defer list.deinit();
-    //    const input = "1234";
+    var args = try std.process.argsWithAllocator(alloc);
+    defer args.deinit();
+    _ = args.skip();
     var stdout = std.io.getStdOut();
     var bufw = std.io.bufferedWriter(stdout.writer());
     defer _ = bufw.flush() catch {};
-
     const writer = bufw.writer();
-    const result = try int_print(u32, 1234);
-    try std.fmt.format(writer, "input:{}\n", .{result});
+    while (args.next()) |n| {
+        const val = try std.fmt.parseInt(u32, n, 0);
+
+        const result = try int_print(u32, val);
+        try std.fmt.format(writer, "input:{}\n", .{result});
+    }
 }
 const expected_output =
     \\ Input: "1234"

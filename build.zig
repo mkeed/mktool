@@ -32,10 +32,8 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
     const modules = [_]Modules{
-        .{
-            .name = "wasm",
-            .file = "modules/wasm/wasm.zig",
-        },
+        .{ .name = "wasm", .file = "modules/wasm/wasm.zig" },
+        .{ .name = "terminal", .file = "modules/terminal/terminal.zig" },
     };
 
     for (modules) |m| {
